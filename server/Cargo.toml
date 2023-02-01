@@ -1,0 +1,15 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "*", features = ["full"]}
+local-ip-address = "*"
+dashmap = { version = "*", features = ["serde"]}
+chrono = { version = "*", features = ["serde"]}
+serde = { version = "*", features = ["derive"]}
+serde_json = "*"
+derive_more = "*"
