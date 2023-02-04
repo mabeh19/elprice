@@ -112,13 +112,13 @@ async fn extract_val(input: &str) -> f64 {
 }
 
 async fn get_current_time_stamp() -> String {
-    Local::now().format("%Y-%m-%d H%H").to_string()
+    Local::now().format(db::DATE_FORMAT).to_string()
 }
 
 async fn get_previous_time_stamp() -> String {
     let now = Local::now();
     let prev_time = now.checked_sub_signed(chrono::Duration::hours(1)).unwrap();
-    prev_time.format("%Y-%m-%d H%H").to_string()
+    prev_time.format(db::DATE_FORMAT).to_string()
 }
 
 async fn handle_get_current_price(db: Database, input: &str) -> Option<String> {

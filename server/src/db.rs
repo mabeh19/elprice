@@ -2,11 +2,14 @@ use std::io;
 use std::sync::Arc;
 use std::fs;
 use dashmap::DashMap;
-use chrono::{naive::NaiveDate, DateTime, Local};
+use chrono::{naive::NaiveDateTime, DateTime, Local};
 use serde::{Deserialize, Serialize};
 use derive_more::{Deref, DerefMut};
 
-type LocalTime = DateTime<Local>;
+
+pub const DATE_FORMAT: &str = "%Y-%m-%d H%H";
+
+type LocalTime = NaiveDateTime;
 type FilterTimeCallback = Option<Box<dyn Fn(&LocalTime) -> bool>>;
 type FilterValueCallback = Option<Box<dyn Fn(&f64) -> bool>>;
 type DbKey = String;
@@ -52,9 +55,58 @@ impl Db {
         }
     }
 
-    pub async fn list(&self, args: &[&str]) {
-        for arg in args {
+    pub async fn list(&self, args: &[&str]) -> Vec<String> {
+        let mut list = Vec::new();
 
+        let filter = self.parse_args(args);
+
+        for set in &self.0 {
+            let (key, val) = set.pair();
+            
+            list.push(format!("{}: {}", key, val));
+        }
+
+        list
+    }
+
+    async fn parse_args(&self, args: &[&str]) -> OutputFilter {
+        if self.is_filtered(args) == false {
+            return OutputFilter::builder().build();
+        }
+
+        let filter = OutputFilter::builder();
+
+        for i in 0..args.len() {
+            let arg = &args[i];
+            match arg {
+                "<" => filter.add_filter(&Comp::Lesser, )
+            }
+        }
+
+        filter.build()
+    }
+
+    async fn is_filtered(&self, args: &[&str]) -> bool {
+        for arg in args {
+            if arg.contains("if") {
+                return true;
+            }
+        }
+        false
+    }
+
+    async fn string_to_date(string: &str) -> LocalTime {
+        DateTime::parse_from_str(string, DATE_FORMAT).unwrap().naive_local()
+    }
+
+    async fn build_times(arg1: &str, arg2: &str) -> Option<LocalTime> {
+        match arg1 {
+            "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
+            "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0", arg2), DATE_FORMAT).ok(),
+            "day" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
+            "hour" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
+            "price" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
+            _ => None,
         }
     }
 }
@@ -86,13 +138,69 @@ impl OutputFilter {
         }
     }
 
-    fn filter(&self, key: &DbKey, val: &DbVal) {
+    fn filter(&self, ) -> Vec<String> {
+        let mut filtered_list = Vec::new();
 
+        for set in db.iter() {
+            let (key, val) = set.pair();
+            
+            if let Some(string) = self.filter_pair(key, val) {
+                filtered_list.push(string);
+            }
+        }       
+
+        filtered_list
+    }
+
+    fn filter_pair(&self, key: &DbKey, val: &DbVal) -> Option<String> {
+        let mut filters_failed = 0;
+        let dt = DateTime::parse_from_str(key, DATE_FORMAT).unwrap().naive_local();
+
+        filters_failed += match &self.year {
+            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+            None => 0
+        };
+
+        filters_failed += match &self.month {
+            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+            None => 0
+        };
+
+        filters_failed += match &self.day {
+            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+            None => 0
+        };
+
+        filters_failed += match &self.hour {
+            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+            None => 0
+        };
+
+        filters_failed += match &self.val {
+            Some(f) => if (*f)(&val) { 0 } else { 1 },
+            None => 0
+        };
+    
+        if filters_failed == 0 {
+            Some(format!("{}: {}", key, val))
+        } else {
+            None
+        }
     }
 }
 
 
 impl OutputFilterBuilder {
+    async fn add_filter(self, comp: &Comp, filter_type: FilterType) -> OutputFilterBuilder {
+        match filter_type {
+            FilterType::Year(y) => self.year(comp, y),
+            FilterType::Month(m) => self.month(comp, m),
+            FilterType::Day(d) => self.day(comp, d),
+            FilterType::Hour(h) => self.hour(comp, h),
+            FilterType::Price(p) => self.val(comp, p)
+        }
+    }
+
     fn year(mut self, comp: &Comp, yr: LocalTime) -> OutputFilterBuilder {
         self.year = Self::construct_time_filter(comp, yr);
         self
@@ -147,6 +255,14 @@ impl OutputFilterBuilder {
             Comp::Greater       => Box::new(move |x: &f64| { *x >  val }),
         })
     }
+}
+
+enum FilterType {
+    Year(LocalTime),
+    Month(LocalTime),
+    Day(LocalTime),
+    Hour(LocalTime),
+    Price(f64)
 }
 
 enum Comp {
