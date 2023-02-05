@@ -6,6 +6,8 @@ use chrono::{naive::NaiveDateTime, DateTime, Local};
 use serde::{Deserialize, Serialize};
 use derive_more::{Deref, DerefMut};
 
+const DB_FILE: &str = ".db.json";
+const BACKUP_FILE: &str = ".db.json.backup";
 
 pub const DATE_FORMAT: &str = "%Y-%m-%d H%H";
 
@@ -39,8 +41,6 @@ impl Db {
     }
 
     pub async fn save(&self) {
-    const DB_FILE: &str = ".db.json";
-    const BACKUP_FILE: &str = ".db.json.backup";
         let map_as_json = serde_json::to_string(&self.0).unwrap();
 //        println!("Serialized: {}", map_as_json);
         fs::write(DB_FILE, map_as_json.clone());
@@ -48,7 +48,6 @@ impl Db {
     }
 
     pub async fn load(&mut self) {
-    const DB_FILE: &str = ".db.json";
         if let Ok(db_as_string) = fs::read_to_string(DB_FILE) {
             let map_as_json: DbInternal = serde_json::from_str(&db_as_string).unwrap();
             self.0 = map_as_json;
@@ -70,18 +69,18 @@ impl Db {
     }
 
     async fn parse_args(&self, args: &[&str]) -> OutputFilter {
-        if self.is_filtered(args) == false {
-            return OutputFilter::builder().build();
-        }
+//        if self.is_filtered(args) == false {
+//            return OutputFilter::builder().build();
+//        }
 
         let filter = OutputFilter::builder();
 
-        for i in 0..args.len() {
-            let arg = &args[i];
-            match arg {
-                "<" => filter.add_filter(&Comp::Lesser, )
-            }
-        }
+//        for i in 0..args.len() {
+//            let arg = &args[i];
+//            match arg {
+//                "<" => filter.add_filter(&Comp::Lesser, )
+//            }
+//        }
 
         filter.build()
     }
@@ -141,13 +140,13 @@ impl OutputFilter {
     fn filter(&self, ) -> Vec<String> {
         let mut filtered_list = Vec::new();
 
-        for set in db.iter() {
-            let (key, val) = set.pair();
-            
-            if let Some(string) = self.filter_pair(key, val) {
-                filtered_list.push(string);
-            }
-        }       
+//        for set in db.iter() {
+//            let (key, val) = set.pair();
+//            
+//            if let Some(string) = self.filter_pair(key, val) {
+//                filtered_list.push(string);
+//            }
+//        }       
 
         filtered_list
     }

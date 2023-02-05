@@ -24,13 +24,14 @@ def get_current_price():
         try:
             soup = BeautifulSoup(driver.page_source, features="html.parser")
             e = soup.find(class_ = "details-header__total")
-            price = float(e.get_text())
+            price = float(e.get_text().replace(",","."))
 
             driver.quit()
             break
         except:
             if retries < 10:
                 print("[{}] Error while loading page, refreshing and retrying...".format(retries))
+                retries += 1
                 driver.refresh()
                 time.sleep(2)
             else:

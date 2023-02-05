@@ -1,20 +1,18 @@
 import time
-import datetime
 import socket
+import threading
+import scheduler
 import scraper
+#import server_restart
 
 ONE_MINUTE = 60
 ONE_HOUR = 60 * 60
 NEXT_HOUR = 1
 IP_ADDRESS = "10.0.2.15"
+#hostname = socket.gethostname()
+#IP_ADDRESS = socket.gethostbyname(hostname)
 PORT = 35000
 
-def sleepUntil(hour):
-    t = datetime.datetime.today()
-    future = datetime.datetime(t.year, t.month, t.day, t.hour + hour, 0)
-    if t.timestamp() > future.timestamp():
-        future += datetime.timedelta(days=1)
-    time.sleep((future-t).total_seconds())
 
 def upload_to_server(price):
     print("Creating socket...")
@@ -25,8 +23,10 @@ def upload_to_server(price):
     print("Data sent, closing connection...")
     s.close()
 
+#threading.Thread(target=server_restart.serverThread).start()
+
 print("Waiting for the beginning of next hour")
-sleepUntil(NEXT_HOUR)
+scheduler.sleepUntilNext(NEXT_HOUR)
 
 while True:
     try: 
@@ -36,7 +36,7 @@ while True:
 
         print("Success! Going to sleep...")
     
-        sleepUntil(NEXT_HOUR)
+        scheduler.sleepUntilNext(NEXT_HOUR)
     except:
         print("Error occurred retrying in a minute")
         time.sleep(ONE_MINUTE)
