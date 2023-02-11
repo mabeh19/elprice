@@ -156,12 +156,19 @@ impl OutputFilter {
             if let Some(string) = self.filter_pair(key.clone(), *val).await {
                 filtered_list.push(string);
             }
-        }       
+        }
 
-        filtered_list
+        // sort list chronologically
+        filtered_list.sort_by(|a, b| {
+             a.0.cmp(&b.0)
+        });
+
+        filtered_list.iter().map(|(key, val)| {
+            format!("{}: {}", key, val)
+        }).collect()
     }
 
-    async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<String> {
+    async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<(DbKey, DbVal)> {
         let mut filters_failed = 0;
         let dt = string_to_date(&key).await;//DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
 
@@ -191,7 +198,7 @@ impl OutputFilter {
         };
     
         if filters_failed == 0 {
-            Some(format!("{}: {}\n", key, val))
+            Some((key, val))
         } else {
             None
         }
