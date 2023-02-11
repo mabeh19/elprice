@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use std::fs;
 use dashmap::DashMap;
-use chrono::{naive::NaiveDateTime, DateTime};
+use chrono::{naive::NaiveDateTime, DateTime, Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 use derive_more::{Deref, DerefMut};
 
 const DB_FILE: &str = ".db.json";
 const BACKUP_FILE: &str = ".db.json.backup";
 
+const DATE_FORMAT_VERBOSE: &str = "%Y-%m-%d H%H:%M:%S %z";
 pub const DATE_FORMAT: &str = "%Y-%m-%d H%H";
 
 type LocalTime = NaiveDateTime;
@@ -40,7 +41,6 @@ impl Db {
 
     pub async fn save(&self) {
         let map_as_json = serde_json::to_string(&self.0).unwrap();
-//        println!("Serialized: {}", map_as_json);
         if let Err(e) = fs::write(DB_FILE, map_as_json.clone()) {
             println!("Failed main save: {}", e);
         }
@@ -71,8 +71,14 @@ impl Db {
 
         let mut filter = OutputFilter::builder();
 
-        for i in 0..args.len() {
+        for i in 1..args.len() {
             let arg = args[i];
+            match arg {
+                ">" | ">=" | "==" | "<=" | "<" => {
+
+                },
+                _ => continue,
+            };
             let comp = Comp::from_str(arg); 
             let f_type = args[i - 1];
             let val = args[i + 1];
@@ -103,34 +109,30 @@ impl Db {
         false
     }
 
-    async fn string_to_date(string: &str) -> LocalTime {
-        DateTime::parse_from_str(string, DATE_FORMAT).unwrap().naive_local()
-    }
-
     async fn build_times(arg1: &str, arg2: &str) -> Option<LocalTime> {
         match arg1 {
-            "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
-            "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0", arg2), DATE_FORMAT).ok(),
-            "day" => LocalTime::parse_from_str(&format!("1-1-{} H0", arg2), DATE_FORMAT).ok(),
-            "hour" => LocalTime::parse_from_str(&format!("1-1-1 H{}", arg2), DATE_FORMAT).ok(),
+            "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "day" => LocalTime::parse_from_str(&format!("1-1-{} H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "hour" => LocalTime::parse_from_str(&format!("1-1-1 H{}:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
             _ => None,
         }
     }
 }
 
 struct OutputFilter {
-    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
-    month: (FilterCallback<LocalTime>, Option<LocalTime>),
-    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
-    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    year:  (FilterCallback<i32>, Option<i32>),
+    month: (FilterCallback<u32>, Option<u32>),
+    day:   (FilterCallback<u32>, Option<u32>),
+    hour:  (FilterCallback<u32>, Option<u32>),
     val: (FilterCallback<f64>, f64)
 }
 
 struct OutputFilterBuilder {
-    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
-    month: (FilterCallback<LocalTime>, Option<LocalTime>),
-    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
-    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    year:  (FilterCallback<i32>, Option<i32>),
+    month: (FilterCallback<u32>, Option<u32>),
+    day:   (FilterCallback<u32>, Option<u32>),
+    hour:  (FilterCallback<u32>, Option<u32>),
     val: (FilterCallback<f64>, f64)
 }
 
@@ -150,36 +152,43 @@ impl OutputFilter {
 
         for set in db.iter() {
             let (key, val) = set.pair();
-            
+         
             if let Some(string) = self.filter_pair(key.clone(), *val).await {
                 filtered_list.push(string);
             }
-        }       
+        }
 
-        filtered_list
+        // sort list chronologically
+        filtered_list.sort_by(|a, b| {
+             a.0.cmp(&b.0)
+        });
+
+        filtered_list.iter().map(|(key, val)| {
+            format!("{}: {}\n", key, val)
+        }).collect()
     }
 
-    async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<String> {
+    async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<(DbKey, DbVal)> {
         let mut filters_failed = 0;
-        let dt = DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
+        let dt = string_to_date(&key).await;//DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
 
         filters_failed += match &self.year.0 {
-            Some(f) => if (*f)(dt, self.year.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.year(), self.year.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.month.0 {
-            Some(f) => if (*f)(dt, self.month.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.month(), self.month.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.day.0 {
-            Some(f) => if (*f)(dt, self.day.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.day(), self.day.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.hour.0 {
-            Some(f) => if (*f)(dt, self.hour.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.hour(), self.hour.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
@@ -189,7 +198,7 @@ impl OutputFilter {
         };
     
         if filters_failed == 0 {
-            Some(format!("{}: {}\n", key, val))
+            Some((key, val))
         } else {
             None
         }
@@ -209,22 +218,22 @@ impl OutputFilterBuilder {
     }
 
     async fn year(mut self, comp: Comp, yr: LocalTime) -> OutputFilterBuilder {
-        self.year = (Self::construct_filter(comp).await, Some(yr));
+        self.year = (Self::construct_filter(comp).await, Some(yr.year()));
         self
     }
 
     async fn month(mut self, comp: Comp, mnth: LocalTime) -> OutputFilterBuilder {
-        self.month = (Self::construct_filter(comp).await, Some(mnth));
+        self.month = (Self::construct_filter(comp).await, Some(mnth.month()));
         self
     }
 
     async fn day(mut self, comp: Comp, day: LocalTime) -> OutputFilterBuilder {
-        self.day = (Self::construct_filter(comp).await, Some(day));
+        self.day = (Self::construct_filter(comp).await, Some(day.day()));
         self
     }
 
     async fn hour(mut self, comp: Comp, hour: LocalTime) -> OutputFilterBuilder {
-        self.hour = (Self::construct_filter(comp).await, Some(hour));
+        self.hour = (Self::construct_filter(comp).await, Some(hour.hour()));
         self
     }
 
@@ -321,6 +330,13 @@ impl Comp {
         }
     }
 }
+
+async fn string_to_date(string: &str) -> LocalTime {
+    let string = format!("{}:00:00 +1000", string);
+    let date_format = format!("{}:%M:%S %z", DATE_FORMAT);
+    DateTime::parse_from_str(&string, &date_format).unwrap().naive_local()
+}
+
 
 #[tokio::test]
 async fn save_load_test() {
