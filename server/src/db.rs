@@ -8,6 +8,7 @@ use derive_more::{Deref, DerefMut};
 const DB_FILE: &str = ".db.json";
 const BACKUP_FILE: &str = ".db.json.backup";
 
+const DATE_FORMAT_VERBOSE: &str = "%Y-%m-%d H%H:%M:%S %z";
 pub const DATE_FORMAT: &str = "%Y-%m-%d H%H";
 
 type LocalTime = NaiveDateTime;
@@ -40,7 +41,6 @@ impl Db {
 
     pub async fn save(&self) {
         let map_as_json = serde_json::to_string(&self.0).unwrap();
-//        println!("Serialized: {}", map_as_json);
         if let Err(e) = fs::write(DB_FILE, map_as_json.clone()) {
             println!("Failed main save: {}", e);
         }
@@ -71,8 +71,14 @@ impl Db {
 
         let mut filter = OutputFilter::builder();
 
-        for i in 0..args.len() {
+        for i in 1..args.len() {
             let arg = args[i];
+            match arg {
+                ">" | ">=" | "==" | "<=" | "<" => {
+
+                },
+                _ => continue,
+            };
             let comp = Comp::from_str(arg); 
             let f_type = args[i - 1];
             let val = args[i + 1];
@@ -103,16 +109,12 @@ impl Db {
         false
     }
 
-    async fn string_to_date(string: &str) -> LocalTime {
-        DateTime::parse_from_str(string, DATE_FORMAT).unwrap().naive_local()
-    }
-
     async fn build_times(arg1: &str, arg2: &str) -> Option<LocalTime> {
         match arg1 {
-            "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
-            "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0", arg2), DATE_FORMAT).ok(),
-            "day" => LocalTime::parse_from_str(&format!("1-1-{} H0", arg2), DATE_FORMAT).ok(),
-            "hour" => LocalTime::parse_from_str(&format!("1-1-1 H{}", arg2), DATE_FORMAT).ok(),
+            "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "day" => LocalTime::parse_from_str(&format!("1-1-{} H0:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
+            "hour" => LocalTime::parse_from_str(&format!("1-1-1 H{}:00:00 +1000", arg2), DATE_FORMAT_VERBOSE).ok(),
             _ => None,
         }
     }
@@ -150,7 +152,7 @@ impl OutputFilter {
 
         for set in db.iter() {
             let (key, val) = set.pair();
-            
+         
             if let Some(string) = self.filter_pair(key.clone(), *val).await {
                 filtered_list.push(string);
             }
@@ -161,7 +163,7 @@ impl OutputFilter {
 
     async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<String> {
         let mut filters_failed = 0;
-        let dt = DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
+        let dt = string_to_date(&key).await;//DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
 
         filters_failed += match &self.year.0 {
             Some(f) => if (*f)(dt, self.year.1.unwrap()) { 0 } else { 1 },
@@ -321,6 +323,13 @@ impl Comp {
         }
     }
 }
+
+async fn string_to_date(string: &str) -> LocalTime {
+    let string = format!("{}:00:00 +1000", string);
+    let date_format = format!("{}:%M:%S %z", DATE_FORMAT);
+    DateTime::parse_from_str(&string, &date_format).unwrap().naive_local()
+}
+
 
 #[tokio::test]
 async fn save_load_test() {
