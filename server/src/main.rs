@@ -1,13 +1,10 @@
 use std::io;
 use std::sync::Arc;
-use std::fs;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::AsyncWriteExt;
 use tokio::time;
 use local_ip_address::local_ip;
-use dashmap::DashMap;
-use chrono::{DateTime, Timelike, Local, naive::NaiveDate};
-use serde_json;
+use chrono::Local;
 
 pub mod db;
 
@@ -38,7 +35,9 @@ async fn main() -> Res {
     
         let db = database.clone();
         tokio::spawn(async move {
-            process(db, socket, ip).await;
+            if let Err(e) = process(db, socket, ip).await {
+                println!("Error occurred in connection to {}: {}", ip, e);
+            };
         });
     }
 }
@@ -85,6 +84,8 @@ async fn parse_input(db: Database, input: &str) -> Option<String> {
     if handle_new_current_price_transfer(db.clone(), input).await {
         return None;
     } else if let Some(resp) = handle_get_current_price(db.clone(), input).await {
+        return Some(resp);
+    } else if let Some(resp) = handle_list_db(db.clone(), input).await {
         return Some(resp);
     }
 
@@ -155,3 +156,11 @@ async fn backup_db(db: Database) {
     }
 }
 
+async fn handle_list_db(db: Database, input: &str) -> Option<String> {
+    if input.starts_with("list") {
+        let args: Vec<&str> = input.split_whitespace().collect();
+        let resp = db.list(&args).await.concat();
+        return Some(resp);
+    }
+    return None;
+}
