@@ -164,7 +164,7 @@ impl OutputFilter {
         });
 
         filtered_list.iter().map(|(key, val)| {
-            format!("{}: {}", key, val)
+            format!("{}: {}\n", key, val)
         }).collect()
     }
 
