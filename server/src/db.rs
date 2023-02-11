@@ -1,8 +1,7 @@
-use std::io;
 use std::sync::Arc;
 use std::fs;
 use dashmap::DashMap;
-use chrono::{naive::NaiveDateTime, DateTime, Local};
+use chrono::{naive::NaiveDateTime, DateTime};
 use serde::{Deserialize, Serialize};
 use derive_more::{Deref, DerefMut};
 
@@ -12,8 +11,7 @@ const BACKUP_FILE: &str = ".db.json.backup";
 pub const DATE_FORMAT: &str = "%Y-%m-%d H%H";
 
 type LocalTime = NaiveDateTime;
-type FilterTimeCallback = Option<Box<dyn Fn(&LocalTime) -> bool>>;
-type FilterValueCallback = Option<Box<dyn Fn(&f64) -> bool>>;
+type FilterCallback<T> = Option<fn(a: T, b: T) -> bool>;
 type DbKey = String;
 type DbVal = f64;
 type DbInternal = DashMap<DbKey, DbVal>;
@@ -43,8 +41,12 @@ impl Db {
     pub async fn save(&self) {
         let map_as_json = serde_json::to_string(&self.0).unwrap();
 //        println!("Serialized: {}", map_as_json);
-        fs::write(DB_FILE, map_as_json.clone());
-        fs::write(BACKUP_FILE, map_as_json);
+        if let Err(e) = fs::write(DB_FILE, map_as_json.clone()) {
+            println!("Failed main save: {}", e);
+        }
+        if let Err(e) = fs::write(BACKUP_FILE, map_as_json) {
+            println!("Failed to save to backup: {}", e);
+        }
     }
 
     pub async fn load(&mut self) {
@@ -55,39 +57,46 @@ impl Db {
     }
 
     pub async fn list(&self, args: &[&str]) -> Vec<String> {
-        let mut list = Vec::new();
 
-        let filter = self.parse_args(args);
-
-        for set in &self.0 {
-            let (key, val) = set.pair();
-            
-            list.push(format!("{}: {}", key, val));
-        }
-
-        list
+        let filter = self.parse_args(args).await;
+        let res = filter.filter(self.0.clone());
+  
+        res.await
     }
 
     async fn parse_args(&self, args: &[&str]) -> OutputFilter {
-//        if self.is_filtered(args) == false {
-//            return OutputFilter::builder().build();
-//        }
+        if self.is_filtered(args).await == false {
+            return OutputFilter::builder().build();
+        }
 
-        let filter = OutputFilter::builder();
+        let mut filter = OutputFilter::builder();
 
-//        for i in 0..args.len() {
-//            let arg = &args[i];
-//            match arg {
-//                "<" => filter.add_filter(&Comp::Lesser, )
-//            }
-//        }
+        for i in 0..args.len() {
+            let arg = args[i];
+            let comp = Comp::from_str(arg); 
+            let f_type = args[i - 1];
+            let val = args[i + 1];
+            let time = Self::build_times(f_type, val).await;
+
+            if comp.is_some() {
+                let f_type = match f_type.to_lowercase().as_str() {
+                    "year" | "month" | "day" | "hour" => FilterType::new_time(f_type, time.unwrap()), 
+                    "price" => FilterType::new_price(f_type, val.parse().unwrap()),
+                    _       => None
+                };
+
+                if let Some(f_type) = f_type {
+                    filter = filter.add_filter(comp.unwrap(), f_type).await;
+                }
+            }
+        }
 
         filter.build()
     }
 
     async fn is_filtered(&self, args: &[&str]) -> bool {
         for arg in args {
-            if arg.contains("if") {
+            if arg.contains("where") || arg.contains("if") {
                 return true;
             }
         }
@@ -102,86 +111,85 @@ impl Db {
         match arg1 {
             "year" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
             "month" => LocalTime::parse_from_str(&format!("1-{}-1 H0", arg2), DATE_FORMAT).ok(),
-            "day" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
-            "hour" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
-            "price" => LocalTime::parse_from_str(&format!("{}-1-1 H0", arg2), DATE_FORMAT).ok(),
+            "day" => LocalTime::parse_from_str(&format!("1-1-{} H0", arg2), DATE_FORMAT).ok(),
+            "hour" => LocalTime::parse_from_str(&format!("1-1-1 H{}", arg2), DATE_FORMAT).ok(),
             _ => None,
         }
     }
 }
 
 struct OutputFilter {
-    year:  FilterTimeCallback,
-    month: FilterTimeCallback,
-    day:   FilterTimeCallback,
-    hour:  FilterTimeCallback, 
-    val: FilterValueCallback
+    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    month: (FilterCallback<LocalTime>, Option<LocalTime>),
+    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
+    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    val: (FilterCallback<f64>, f64)
 }
 
 struct OutputFilterBuilder {
-    year:  FilterTimeCallback,
-    month: FilterTimeCallback,
-    day:   FilterTimeCallback,
-    hour:  FilterTimeCallback,
-    val: FilterValueCallback
+    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    month: (FilterCallback<LocalTime>, Option<LocalTime>),
+    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
+    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    val: (FilterCallback<f64>, f64)
 }
 
 impl OutputFilter {
     fn builder() -> OutputFilterBuilder {
         OutputFilterBuilder {
-            year:   None,
-            month:  None,
-            day:    None,
-            hour:   None,
-            val:    None
+            year:   (None, None),
+            month:  (None, None),
+            day:    (None, None),
+            hour:   (None, None),
+            val:    (None, 0.)
         }
     }
 
-    fn filter(&self, ) -> Vec<String> {
+    async fn filter(&self, db: DbInternal) -> Vec<String> {
         let mut filtered_list = Vec::new();
 
-//        for set in db.iter() {
-//            let (key, val) = set.pair();
-//            
-//            if let Some(string) = self.filter_pair(key, val) {
-//                filtered_list.push(string);
-//            }
-//        }       
+        for set in db.iter() {
+            let (key, val) = set.pair();
+            
+            if let Some(string) = self.filter_pair(key.clone(), *val).await {
+                filtered_list.push(string);
+            }
+        }       
 
         filtered_list
     }
 
-    fn filter_pair(&self, key: &DbKey, val: &DbVal) -> Option<String> {
+    async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<String> {
         let mut filters_failed = 0;
-        let dt = DateTime::parse_from_str(key, DATE_FORMAT).unwrap().naive_local();
+        let dt = DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
 
-        filters_failed += match &self.year {
-            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+        filters_failed += match &self.year.0 {
+            Some(f) => if (*f)(dt, self.year.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
-        filters_failed += match &self.month {
-            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+        filters_failed += match &self.month.0 {
+            Some(f) => if (*f)(dt, self.month.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
-        filters_failed += match &self.day {
-            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+        filters_failed += match &self.day.0 {
+            Some(f) => if (*f)(dt, self.day.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
-        filters_failed += match &self.hour {
-            Some(f) => if (*f)(&dt) { 0 } else { 1 },
+        filters_failed += match &self.hour.0 {
+            Some(f) => if (*f)(dt, self.hour.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
-        filters_failed += match &self.val {
-            Some(f) => if (*f)(&val) { 0 } else { 1 },
+        filters_failed += match &self.val.0 {
+            Some(f) => if (*f)(val, self.val.1) { 0 } else { 1 },
             None => 0
         };
     
         if filters_failed == 0 {
-            Some(format!("{}: {}", key, val))
+            Some(format!("{}: {}\n", key, val))
         } else {
             None
         }
@@ -190,38 +198,38 @@ impl OutputFilter {
 
 
 impl OutputFilterBuilder {
-    async fn add_filter(self, comp: &Comp, filter_type: FilterType) -> OutputFilterBuilder {
+    async fn add_filter(self, comp: Comp, filter_type: FilterType) -> OutputFilterBuilder {
         match filter_type {
-            FilterType::Year(y) => self.year(comp, y),
-            FilterType::Month(m) => self.month(comp, m),
-            FilterType::Day(d) => self.day(comp, d),
-            FilterType::Hour(h) => self.hour(comp, h),
-            FilterType::Price(p) => self.val(comp, p)
+            FilterType::Year(y) => self.year(comp, y).await,
+            FilterType::Month(m) => self.month(comp, m).await,
+            FilterType::Day(d) => self.day(comp, d).await,
+            FilterType::Hour(h) => self.hour(comp, h).await,
+            FilterType::Price(p) => self.val(comp, p).await
         }
     }
 
-    fn year(mut self, comp: &Comp, yr: LocalTime) -> OutputFilterBuilder {
-        self.year = Self::construct_time_filter(comp, yr);
+    async fn year(mut self, comp: Comp, yr: LocalTime) -> OutputFilterBuilder {
+        self.year = (Self::construct_filter(comp).await, Some(yr));
         self
     }
 
-    fn month(mut self, comp: &Comp, mnth: LocalTime) -> OutputFilterBuilder {
-        self.month = Self::construct_time_filter(comp, mnth);
+    async fn month(mut self, comp: Comp, mnth: LocalTime) -> OutputFilterBuilder {
+        self.month = (Self::construct_filter(comp).await, Some(mnth));
         self
     }
 
-    fn day(mut self, comp: &Comp, day: LocalTime) -> OutputFilterBuilder {
-        self.day = Self::construct_time_filter(comp, day);
+    async fn day(mut self, comp: Comp, day: LocalTime) -> OutputFilterBuilder {
+        self.day = (Self::construct_filter(comp).await, Some(day));
         self
     }
 
-    fn hour(mut self, comp: &Comp, hour: LocalTime) -> OutputFilterBuilder {
-        self.hour = Self::construct_time_filter(comp, hour);
+    async fn hour(mut self, comp: Comp, hour: LocalTime) -> OutputFilterBuilder {
+        self.hour = (Self::construct_filter(comp).await, Some(hour));
         self
     }
 
-    fn val(mut self, comp: &Comp, val: f64) -> OutputFilterBuilder {
-        self.val = Self::construct_val_filter(comp, val);
+    async fn val(mut self, comp: Comp, val: f64) -> OutputFilterBuilder {
+        self.val = (Self::construct_filter(comp).await, val);
         self
     }
 
@@ -235,25 +243,35 @@ impl OutputFilterBuilder {
         }
     }
 
-    fn construct_time_filter(comp: &Comp, time: LocalTime) -> FilterTimeCallback {
+    async fn construct_filter<T: PartialOrd>(comp: Comp) -> FilterCallback<T> {
         Some(match comp {
-            Comp::Lesser        => Box::new(move |x: &LocalTime| { *x <  time }),
-            Comp::LesserEqual   => Box::new(move |x: &LocalTime| { *x <= time }),
-            Comp::Equal         => Box::new(move |x: &LocalTime| { *x == time }),
-            Comp::GreaterEqual  => Box::new(move |x: &LocalTime| { *x >= time }),
-            Comp::Greater       => Box::new(move |x: &LocalTime| { *x >  time }),
+            Comp::Lesser        => lesser, 
+            Comp::LesserEqual   => lesser_equal,
+            Comp::Equal         => equal,
+            Comp::GreaterEqual  => greater_equal, 
+            Comp::Greater       => greater 
         })
     }
+}
 
-    fn construct_val_filter(comp: &Comp, val: f64) -> FilterValueCallback {
-        Some(match comp {
-            Comp::Lesser        => Box::new(move |x: &f64| { *x <  val }),
-            Comp::LesserEqual   => Box::new(move |x: &f64| { *x <= val }),
-            Comp::Equal         => Box::new(move |x: &f64| { *x == val }),
-            Comp::GreaterEqual  => Box::new(move |x: &f64| { *x >= val }),
-            Comp::Greater       => Box::new(move |x: &f64| { *x >  val }),
-        })
-    }
+fn lesser<T: PartialOrd>(a: T, b: T) -> bool {
+    return a < b;
+}
+
+fn lesser_equal<T: PartialOrd>(a: T, b: T) -> bool {
+    return a <= b;
+}
+
+fn equal<T: PartialOrd>(a: T, b: T) -> bool {
+    return a == b;
+}
+
+fn greater_equal<T: PartialOrd>(a: T, b: T) -> bool {
+    return a >= b;
+}
+
+fn greater<T: PartialOrd>(a: T, b: T) -> bool {
+    return a > b;
 }
 
 enum FilterType {
@@ -264,12 +282,44 @@ enum FilterType {
     Price(f64)
 }
 
+impl FilterType {
+    fn new_price(f_type: &str, val: f64) -> Option<Self> {
+        match f_type.to_lowercase().as_str() {
+            "price" => Some(Self::Price(val)),
+            _       => None
+        }   
+    }
+
+    fn new_time(f_type: &str, val: LocalTime) -> Option<Self> {
+        match f_type.to_lowercase().as_str() {
+            "year"  => Some(Self::Year(val)),
+            "month" => Some(Self::Month(val)),
+            "day"   => Some(Self::Day(val)),
+            "hour"  => Some(Self::Hour(val)),
+            _       => None 
+        }
+    }
+}
+
 enum Comp {
     Lesser,
     LesserEqual,
     Equal,
     GreaterEqual,
     Greater
+}
+
+impl Comp {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "<"     => Some(Comp::Lesser),
+            "<="    => Some(Comp::LesserEqual),
+            "=="    => Some(Comp::Equal),
+            ">="    => Some(Comp::GreaterEqual),
+            ">"     => Some(Comp::Greater),
+            _       => None
+        }
+    }
 }
 
 #[tokio::test]
