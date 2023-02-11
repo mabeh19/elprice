@@ -170,7 +170,7 @@ impl OutputFilter {
 
     async fn filter_pair(&self, key: DbKey, val: DbVal) -> Option<(DbKey, DbVal)> {
         let mut filters_failed = 0;
-        let dt = string_to_date(&key).await;//DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
+        let dt = string_to_date(&key).await;
 
         filters_failed += match &self.year.0 {
             Some(f) => if (*f)(dt.year(), self.year.1.unwrap()) { 0 } else { 1 },
