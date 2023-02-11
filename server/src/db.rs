@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::fs;
 use dashmap::DashMap;
-use chrono::{naive::NaiveDateTime, DateTime};
+use chrono::{naive::NaiveDateTime, DateTime, Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 use derive_more::{Deref, DerefMut};
 
@@ -121,18 +121,18 @@ impl Db {
 }
 
 struct OutputFilter {
-    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
-    month: (FilterCallback<LocalTime>, Option<LocalTime>),
-    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
-    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    year:  (FilterCallback<i32>, Option<i32>),
+    month: (FilterCallback<u32>, Option<u32>),
+    day:   (FilterCallback<u32>, Option<u32>),
+    hour:  (FilterCallback<u32>, Option<u32>),
     val: (FilterCallback<f64>, f64)
 }
 
 struct OutputFilterBuilder {
-    year:  (FilterCallback<LocalTime>, Option<LocalTime>),
-    month: (FilterCallback<LocalTime>, Option<LocalTime>),
-    day:   (FilterCallback<LocalTime>, Option<LocalTime>),
-    hour:  (FilterCallback<LocalTime>, Option<LocalTime>),
+    year:  (FilterCallback<i32>, Option<i32>),
+    month: (FilterCallback<u32>, Option<u32>),
+    day:   (FilterCallback<u32>, Option<u32>),
+    hour:  (FilterCallback<u32>, Option<u32>),
     val: (FilterCallback<f64>, f64)
 }
 
@@ -166,22 +166,22 @@ impl OutputFilter {
         let dt = string_to_date(&key).await;//DateTime::parse_from_str(&key, DATE_FORMAT).unwrap().naive_local();
 
         filters_failed += match &self.year.0 {
-            Some(f) => if (*f)(dt, self.year.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.year(), self.year.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.month.0 {
-            Some(f) => if (*f)(dt, self.month.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.month(), self.month.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.day.0 {
-            Some(f) => if (*f)(dt, self.day.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.day(), self.day.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
         filters_failed += match &self.hour.0 {
-            Some(f) => if (*f)(dt, self.hour.1.unwrap()) { 0 } else { 1 },
+            Some(f) => if (*f)(dt.hour(), self.hour.1.unwrap()) { 0 } else { 1 },
             None => 0
         };
 
@@ -211,22 +211,22 @@ impl OutputFilterBuilder {
     }
 
     async fn year(mut self, comp: Comp, yr: LocalTime) -> OutputFilterBuilder {
-        self.year = (Self::construct_filter(comp).await, Some(yr));
+        self.year = (Self::construct_filter(comp).await, Some(yr.year()));
         self
     }
 
     async fn month(mut self, comp: Comp, mnth: LocalTime) -> OutputFilterBuilder {
-        self.month = (Self::construct_filter(comp).await, Some(mnth));
+        self.month = (Self::construct_filter(comp).await, Some(mnth.month()));
         self
     }
 
     async fn day(mut self, comp: Comp, day: LocalTime) -> OutputFilterBuilder {
-        self.day = (Self::construct_filter(comp).await, Some(day));
+        self.day = (Self::construct_filter(comp).await, Some(day.day()));
         self
     }
 
     async fn hour(mut self, comp: Comp, hour: LocalTime) -> OutputFilterBuilder {
-        self.hour = (Self::construct_filter(comp).await, Some(hour));
+        self.hour = (Self::construct_filter(comp).await, Some(hour.hour()));
         self
     }
 
