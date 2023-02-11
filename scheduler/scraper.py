@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 
 def get_current_price():
     driver = webdriver.Firefox()
+    driver.set_page_load_timeout(30) # wait for max 30 seconds for the page to load
     price = 0.0
 
     driver.get("https://www.energifyn.dk/kundeservice/kundeservice-el/faq-el/hvad-er-prisen-pa-el/")
@@ -28,13 +29,16 @@ def get_current_price():
 
             driver.quit()
             break
-        except:
+        except Excetion as e:
+            if e == TimeoutException:
+                print("Timeout on server, skipping this hour")
             if retries < 10:
                 print("[{}] Error while loading page, refreshing and retrying...".format(retries))
                 retries += 1
                 driver.refresh()
                 time.sleep(2)
             else:
+                price = -1.0
                 break
 
     return price

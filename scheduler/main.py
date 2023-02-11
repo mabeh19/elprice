@@ -31,10 +31,10 @@ scheduler.sleepUntilNext(NEXT_HOUR)
 while True:
     try: 
         current_price = scraper.get_current_price()
-     
-        upload_to_server(current_price)
-
-        print("Success! Going to sleep...")
+    
+        if current_price != -1:
+            upload_to_server(current_price)
+            print("Success! Going to sleep...")
     
         scheduler.sleepUntilNext(NEXT_HOUR)
     except:
