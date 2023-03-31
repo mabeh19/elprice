@@ -5,6 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::time;
 use local_ip_address::local_ip;
 use chrono::Local;
+use itertools::put_back;
 
 pub mod db;
 
@@ -63,8 +64,7 @@ async fn process(db: Database, socket: TcpStream, peer: std::net::SocketAddr) ->
                 let string = string.trim();
                 println!("Read {} bytes: {}", n, string);
                 if let Some(response) = parse_input(db.clone(), &string).await {
-                    socket.write_all(response.as_bytes()).await?;
-                    socket.write_all(b"\n").await?;
+                    socket.write_all(format!("{}\n", response).as_bytes()).await?;
                 }
             },
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {

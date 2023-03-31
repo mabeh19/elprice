@@ -13,3 +13,4 @@ chrono = { version = "*", features = ["serde"]}
 serde = { version = "*", features = ["derive"]}
 serde_json = "*"
 derive_more = "*"
+itertools = "*"
