@@ -1,3 +1,4 @@
+#!/bin/python3
 import time
 import socket
 import threading
@@ -38,7 +39,7 @@ def upload_to_server(price):
 #threading.Thread(target=server_restart.serverThread).start()
 
 print("Waiting for the beginning of next hour")
-scheduler.sleepUntilNext(NEXT_HOUR)
+#scheduler.sleepUntilNext(NEXT_HOUR)
 
 while True:
     try: 
