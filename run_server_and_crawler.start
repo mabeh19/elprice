@@ -1,0 +1,3 @@
+#!/bin/zsh
+/home/mat/Documents/Rust/elprice/server/target/release/server &
+/home/mat/Documents/Rust/elprice/crawler/a.out &
